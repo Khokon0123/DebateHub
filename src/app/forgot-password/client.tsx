@@ -7,7 +7,6 @@ import { AuthCard } from "@/components/auth/auth-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { getAppwriteAccount } from "@/lib/appwrite/appwrite";
 
 export default function ForgotPasswordClient() {
   const searchParams = useSearchParams();
@@ -23,20 +22,16 @@ export default function ForgotPasswordClient() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-
     if (!email.trim()) return setError("Email is required.");
-
     setSubmitting(true);
     try {
-      const account = getAppwriteAccount();
-      if (!account) {
-        setError("Appwrite is not configured. Set NEXT_PUBLIC_APPWRITE_* env vars.");
-        return;
-      }
-      await account.createRecovery(
-        email.trim(),
-        `${window.location.origin}/reset-password`,
-      );
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
       setSent(true);
       toast({ tone: "success", message: "Reset link sent" });
     } catch (e: any) {
@@ -49,7 +44,7 @@ export default function ForgotPasswordClient() {
   return (
     <AuthCard
       title="Reset your password"
-      subtitle="We’ll email you a reset link."
+      subtitle="We'll email you a reset link."
       footer={
         <Link
           href="/login"
@@ -62,7 +57,7 @@ export default function ForgotPasswordClient() {
       {sent ? (
         <div className="rounded-[14px] bg-[var(--blue-bg)] p-4 text-sm text-[var(--blue-text)]">
           If an account exists for <span className="font-medium">{email}</span>,
-          you’ll get a reset email shortly.
+          you'll get a reset email shortly.
         </div>
       ) : (
         <form onSubmit={onSubmit} className="space-y-3">
@@ -95,4 +90,3 @@ export default function ForgotPasswordClient() {
     </AuthCard>
   );
 }
-
