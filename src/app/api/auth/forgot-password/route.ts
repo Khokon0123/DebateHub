@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getMongoDb } from "@/lib/mongo/server";
-import { Resend } from "resend";
 import { randomUUID } from "crypto";
+import nodemailer from "nodemailer";
 
 export async function POST(req: Request) {
   const { email } = await req.json();
@@ -33,13 +33,19 @@ export async function POST(req: Request) {
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
   const proto = req.headers.get("x-forwarded-proto") ?? "http";
   const baseUrl = process.env.APP_URL || (host ? `${proto}://${host}` : "");
-
   const resetUrl = `${baseUrl}/reset-password?token=${token}&email=${encodeURIComponent(normalizedEmail)}`;
 
   try {
-    const resend = new Resend(process.env.RESEND_API_KEY);
-    await resend.emails.send({
-      from: "DebateHub <onboarding@resend.dev>",
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASSWORD,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"DebateHub" <${process.env.GMAIL_USER}>`,
       to: normalizedEmail,
       subject: "Reset your DebateHub password",
       html: `

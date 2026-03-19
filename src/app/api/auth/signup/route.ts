@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { randomUUID } from "crypto";
 import { getMongoDb } from "@/lib/mongo/server";
 import { getAppwriteAdmin } from "@/lib/appwrite/admin";
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
 
 export async function POST(req: Request) {
   const db = await getMongoDb();
@@ -13,10 +13,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Email is required." }, { status: 400 });
   }
   if (!password || typeof password !== "string" || password.length < 8) {
-    return NextResponse.json(
-      { error: "Password must be at least 8 characters." },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "Password must be at least 8 characters." }, { status: 400 });
   }
 
   const normalizedEmail = email.trim().toLowerCase();
@@ -27,10 +24,7 @@ export async function POST(req: Request) {
 
   const existing = await users.findOne({ email: normalizedEmail });
   if (existing) {
-    return NextResponse.json(
-      { error: "Account already exists for this email." },
-      { status: 409 },
-    );
+    return NextResponse.json({ error: "Account already exists for this email." }, { status: 409 });
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
@@ -45,10 +39,7 @@ export async function POST(req: Request) {
       name: typeof full_name === "string" ? full_name : undefined,
     } as any);
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message ?? "Could not create account." },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: e?.message ?? "Could not create account." }, { status: 400 });
   }
 
   // Create auth user in MongoDB
@@ -71,24 +62,27 @@ export async function POST(req: Request) {
     createdAt: new Date().toISOString(),
   } as any);
 
-  // Send verification email via Resend
+  // Send verification email via Nodemailer (Gmail)
   let verificationSent = false;
   try {
-    const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
-    const proto = req.headers.get("x-forwarded-proto") ?? "http";
-    const baseUrl =
-      process.env.APP_URL ||
-      (host ? `${proto}://${host}` : "");
-
-    // Create a verification token using Appwrite
     const { users: awUsers } = getAppwriteAdmin();
     const token = await awUsers.createToken({ userId, expire: 3600 } as any);
 
+    const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+    const proto = req.headers.get("x-forwarded-proto") ?? "http";
+    const baseUrl = process.env.APP_URL || (host ? `${proto}://${host}` : "");
     const verifyUrl = `${baseUrl}/verify?userId=${userId}&secret=${token.secret}`;
 
-    const resend = new Resend(process.env.RESEND_API_KEY);
-    await resend.emails.send({
-      from: "DebateHub <onboarding@resend.dev>",
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASSWORD,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"DebateHub" <${process.env.GMAIL_USER}>`,
       to: normalizedEmail,
       subject: "Verify your DebateHub account",
       html: `
