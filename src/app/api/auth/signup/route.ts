@@ -3,12 +3,7 @@ import bcrypt from "bcryptjs";
 import { randomUUID } from "crypto";
 import { getMongoDb } from "@/lib/mongo/server";
 import { getAppwriteAdmin } from "@/lib/appwrite/admin";
-
-function getJwtSecret() {
-  // In production, set JWT_SECRET in env.
-  // For dev it falls back to a non-secure placeholder to keep the app runnable.
-  return process.env.JWT_SECRET ?? "dev-change-me-jwt-secret";
-}
+import { Resend } from "resend";
 
 export async function POST(req: Request) {
   const db = await getMongoDb();
@@ -40,7 +35,7 @@ export async function POST(req: Request) {
 
   const passwordHash = await bcrypt.hash(password, 10);
 
-  // Create user in Appwrite first (so we can fail early if Appwrite rejects).
+  // Create user in Appwrite first
   try {
     const { users: awUsers } = getAppwriteAdmin();
     await awUsers.create({
@@ -56,7 +51,7 @@ export async function POST(req: Request) {
     );
   }
 
-  // Create auth user
+  // Create auth user in MongoDB
   await users.insertOne({
     _id: userId as any,
     email: normalizedEmail,
@@ -64,7 +59,7 @@ export async function POST(req: Request) {
     createdAt: new Date().toISOString(),
   } as any);
 
-  // Create profile for organizer (default role is not admin)
+  // Create profile
   await profiles.insertOne({
     _id: userId as any,
     email: normalizedEmail,
@@ -76,36 +71,40 @@ export async function POST(req: Request) {
     createdAt: new Date().toISOString(),
   } as any);
 
-  // Send Appwrite verification email.
+  // Send verification email via Resend
   let verificationSent = false;
   try {
-    const { users: awUsers } = getAppwriteAdmin();
-    const session = await awUsers.createSession({ userId } as any);
-    const jwtRes = await awUsers.createJWT({ userId, sessionId: session.$id } as any);
-
-    const { client } = getAppwriteAdmin();
-    client.setJWT(jwtRes.jwt);
-    const account = new (await import("node-appwrite")).Account(client);
-
     const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
     const proto = req.headers.get("x-forwarded-proto") ?? "http";
     const baseUrl =
       process.env.APP_URL ||
-      process.env.NEXT_PUBLIC_APP_URL ||
       (host ? `${proto}://${host}` : "");
 
-    if (!baseUrl) {
-      throw new Error(
-        "Missing APP_URL for verification redirect (e.g. http://localhost:3000).",
-      );
-    }
+    // Create a verification token using Appwrite
+    const { users: awUsers } = getAppwriteAdmin();
+    const token = await awUsers.createToken({ userId, expire: 3600 } as any);
 
-    await account.createVerification(`${baseUrl}/verify`);
+    const verifyUrl = `${baseUrl}/verify?userId=${userId}&secret=${token.secret}`;
+
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    await resend.emails.send({
+      from: "DebateHub <onboarding@resend.dev>",
+      to: normalizedEmail,
+      subject: "Verify your DebateHub account",
+      html: `
+        <h2>Welcome to DebateHub!</h2>
+        <p>Click the link below to verify your email address:</p>
+        <a href="${verifyUrl}" style="background:#1d4ed8;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;">
+          Verify Email
+        </a>
+        <p>This link expires in 1 hour.</p>
+        <p>If you did not create an account, ignore this email.</p>
+      `,
+    });
     verificationSent = true;
-  } catch {
-    // If email fails, still keep the user created; they can retry later.
+  } catch (e) {
+    console.error("Verification email failed:", e);
   }
 
   return NextResponse.json({ ok: true, verificationSent });
 }
-
