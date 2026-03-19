@@ -246,7 +246,7 @@ export default function HomeClient({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:overflow-x-auto">
             <div className="ui-label mr-1 text-[color:var(--muted)]">Date</div>
             {(
               [
