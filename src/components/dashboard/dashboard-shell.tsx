@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { HomeIcon, ListIcon, PlusIcon, SlotsIcon, UserIcon } from "./icons";
 
 type Profile = {
@@ -59,9 +58,6 @@ function isActive(pathname: string, href: string) {
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const supabaseRef = React.useRef<ReturnType<
-    typeof createBrowserSupabaseClient
-  > | null>(null);
 
   const [ready, setReady] = React.useState(false);
   const [loadState, setLoadState] = React.useState<string | null>(null);
@@ -69,29 +65,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [email, setEmail] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (typeof window !== "undefined") {
-      const demo = window.localStorage.getItem("debatehub_demo_user");
-      if (demo === "1") {
-        setEmail("demo@debatehub.test");
-        setProfile({
-          full_name: "Demo User",
-          organization: "Demo Club",
-          email: "demo@debatehub.test",
-        });
-        setLoadState(null);
-        setReady(true);
-        return;
-      }
-    }
-
-    const supabase = (supabaseRef.current ??= createBrowserSupabaseClient());
-    if (!supabase) {
-      console.log("[dashboard] supabase client not configured. Check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local");
-      router.replace(`/login?next=${encodeURIComponent("/dashboard")}`);
-      return;
-    }
-    const sb = supabase;
-
     let cancelled = false;
     async function load() {
       setLoadState(null);
@@ -104,74 +77,40 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         }
       }, 10000);
 
-      const { data, error } = await sb.auth.getUser();
-      if (cancelled) return;
-
-      if (error) {
-        window.clearTimeout(timeoutId);
-        console.log("[dashboard] auth.getUser error:", error);
-        setLoadState(EMPTY_STATE);
-        setReady(true);
-        return;
-      }
-
-      if (!data.user) {
-        window.clearTimeout(timeoutId);
-        setReady(true);
-        router.replace(
-          `/login?next=${encodeURIComponent(pathname || "/dashboard")}`,
-        );
-        return;
-      }
-
-      const user = data.user;
-      setEmail(user.email ?? null);
       try {
-        const { data: p, error: pErr } = await sb
-          .from("profiles")
-          .select("full_name,organization,email")
-          .eq("id", user.id)
-          .maybeSingle();
+        const res = await fetch("/api/auth/me", { method: "GET" });
+        if (cancelled) return;
+        window.clearTimeout(timeoutId);
 
-        if (pErr) {
-          console.log("[dashboard] profiles select error:", pErr);
+        if (!res.ok) {
+          setReady(true);
+          router.replace(
+            `/login?next=${encodeURIComponent(pathname || "/dashboard")}`,
+          );
+          return;
         }
 
-        if (!p) {
-          const fullName =
-            (user.user_metadata?.full_name as string | undefined) ??
-            (user.user_metadata?.name as string | undefined) ??
-            (user.email ? user.email.split("@")[0] : "Organizer");
-          const organization =
-            (user.user_metadata?.organization as string | undefined) ?? null;
+        const data = (await res.json()) as any;
+        const user = data?.user;
+        const prof = data?.profile;
 
-          const { data: created, error: createErr } = await sb
-            .from("profiles")
-            .upsert(
-              {
-                id: user.id,
-                email: user.email ?? null,
-                full_name: fullName,
-                organization,
-              },
-              { onConflict: "id" },
-            )
-            .select("full_name,organization,email")
-            .maybeSingle();
-
-          if (createErr) {
-            console.log("[dashboard] profiles upsert error:", createErr);
-            setProfile(null);
-            setLoadState(EMPTY_STATE);
-          } else {
-            setProfile((created as Profile | null) ?? null);
-          }
-        } else {
-          setProfile((p as Profile | null) ?? null);
+        if (!user) {
+          setReady(true);
+          router.replace(
+            `/login?next=${encodeURIComponent(pathname || "/dashboard")}`,
+          );
+          return;
         }
+
+        setEmail(user.email ?? null);
+        setProfile({
+          full_name: (prof?.full_name as string | null) ?? null,
+          organization: (prof?.organization as string | null) ?? null,
+          email: (prof?.email as string | null) ?? null,
+        });
       } catch (e: any) {
-        console.log("[dashboard] profile load exception:", e);
         setLoadState(EMPTY_STATE);
+        console.log("[dashboard] profile fetch error:", e);
       } finally {
         window.clearTimeout(timeoutId);
         if (!cancelled) setReady(true);
@@ -179,19 +118,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     }
     load();
 
-    const { data: sub } = sb.auth.onAuthStateChange(() => load());
     return () => {
       cancelled = true;
-      sub.subscription.unsubscribe();
     };
   }, [router, pathname]);
 
   async function signOut() {
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem("debatehub_demo_user");
-    }
-    const supabase = (supabaseRef.current ??= createBrowserSupabaseClient());
-    if (supabase) await supabase.auth.signOut();
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
     router.replace("/");
   }
 

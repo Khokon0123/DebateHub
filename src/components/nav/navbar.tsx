@@ -5,12 +5,12 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 type AuthedUser = {
   id: string;
   email: string | null;
   fullName: string | null;
+  role?: string | null;
 };
 
 function isActive(pathname: string, href: string) {
@@ -21,9 +21,6 @@ function isActive(pathname: string, href: string) {
 export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
-  const supabaseRef = React.useRef<ReturnType<
-    typeof createBrowserSupabaseClient
-  > | null>(null);
 
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [user, setUser] = React.useState<AuthedUser | null>(null);
@@ -31,43 +28,38 @@ export function Navbar() {
 
   React.useEffect(() => {
     let cancelled = false;
-    const supabase = (supabaseRef.current ??= createBrowserSupabaseClient());
-    if (!supabase) return;
-    const sb = supabase;
 
     async function load() {
-      const { data } = await sb.auth.getUser();
-      const u = data.user;
-      if (!u || cancelled) return setUser(null);
-
-      const metaName =
-        (u.user_metadata?.full_name as string | undefined) ??
-        (u.user_metadata?.name as string | undefined) ??
-        null;
-
-      // Optional: try profiles.full_name if schema exists and RLS allows
-      let profileName: string | null = null;
       try {
-        const { data: profile } = await sb
-          .from("profiles")
-          .select("full_name")
-          .eq("id", u.id)
-          .maybeSingle();
-        profileName = (profile?.full_name as string | null) ?? null;
-      } catch {
-        // ignore (schema not created yet / RLS / network)
-      }
+        const res = await fetch("/api/auth/me", { method: "GET" });
+        if (!res.ok) {
+          if (!cancelled) setUser(null);
+          return;
+        }
+        const data = (await res.json()) as any;
+        const u = data?.user;
+        const profile = data?.profile;
+        if (!u) {
+          if (!cancelled) setUser(null);
+          return;
+        }
 
-      const fullName = profileName ?? metaName;
-      setUser({ id: u.id, email: u.email ?? null, fullName });
+        if (cancelled) return;
+        setUser({
+          id: u.id,
+          email: u.email ?? null,
+          fullName: (profile?.full_name as string | null) ?? null,
+          role: (profile?.role as string | null) ?? null,
+        });
+      } catch {
+        if (!cancelled) setUser(null);
+      }
     }
 
     load();
 
-    const { data: sub } = sb.auth.onAuthStateChange(() => load());
     return () => {
       cancelled = true;
-      sub.subscription.unsubscribe();
     };
   }, []);
 
@@ -105,8 +97,8 @@ export function Navbar() {
   };
 
   async function onSignOut() {
-    const supabase = (supabaseRef.current ??= createBrowserSupabaseClient());
-    if (supabase) await supabase.auth.signOut();
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+    setUser(null);
     router.push("/");
   }
 

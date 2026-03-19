@@ -7,8 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
-import { getAdminSupabase } from "./_lib/supabase";
-import { TOURNAMENT_SELECT_WITH_ORGANIZER, mapOrganizer } from "./_lib/queries";
 import type { AdminTournamentRow } from "./_lib/types";
 
 function statusVariant(status: string) {
@@ -34,24 +32,18 @@ export default function AdminDashboardPage() {
   const [deleting, setDeleting] = React.useState(false);
 
   async function load() {
-    const supabase = getAdminSupabase();
-    if (!supabase) return;
-    const sb = supabase;
-
     setLoading(true);
-    const { data, error } = await sb
-      .from("tournaments")
-      .select(TOURNAMENT_SELECT_WITH_ORGANIZER)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      toast({ tone: "danger", message: error.message });
+    try {
+      const res = await fetch("/api/admin/tournaments");
+      if (!res.ok) throw new Error("Could not load admin tournaments.");
+      const data = (await res.json()) as any;
+      setRows((data?.items ?? []) as AdminTournamentRow[]);
+    } catch (e: any) {
+      toast({ tone: "danger", message: e?.message ?? "Could not load admin tournaments." });
       setRows([]);
+    } finally {
       setLoading(false);
-      return;
     }
-    setRows(((data as any[]) ?? []).map(mapOrganizer));
-    setLoading(false);
   }
 
   React.useEffect(() => {
@@ -73,15 +65,13 @@ export default function AdminDashboardPage() {
   );
 
   async function setStatus(id: string, status: "approved" | "rejected") {
-    const supabase = getAdminSupabase();
-    if (!supabase) return;
-    const sb = supabase;
-
-    const { error } = await (sb.from("tournaments") as any)
-      .update({ status })
-      .eq("id", id);
-    if (error) {
-      toast({ tone: "danger", message: error.message });
+    const res = await fetch(`/api/admin/tournaments/${id}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    if (!res.ok) {
+      toast({ tone: "danger", message: "Could not update tournament status." });
       return;
     }
     toast({ tone: "success", message: status === "approved" ? "Approved" : "Rejected" });
@@ -95,19 +85,15 @@ export default function AdminDashboardPage() {
 
   async function confirmDelete() {
     if (!deleteTarget) return;
-    const supabase = getAdminSupabase();
-    if (!supabase) return;
-    const sb = supabase;
-
     const id = deleteTarget.id;
     setDeleting(true);
     setRows((prev) => prev.filter((x) => x.id !== id));
-    const { error } = await sb.from("tournaments").delete().eq("id", id);
+    const res = await fetch(`/api/admin/tournaments/${id}`, { method: "DELETE" });
     setDeleting(false);
     setDeleteOpen(false);
     setDeleteTarget(null);
-    if (error) {
-      toast({ tone: "danger", message: error.message });
+    if (!res.ok) {
+      toast({ tone: "danger", message: "Could not delete tournament." });
       await load();
       return;
     }

@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { getMongoDb } from "@/lib/mongo/server";
 import { RegistrationSidebar } from "./registration-sidebar";
 
 type Tournament = {
@@ -113,29 +113,25 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
-  const supabase = createServerSupabaseClient();
-  if (!supabase) {
-    return {
-      title: "Tournament — DebateHub",
-      description: "Tournament details on DebateHub.",
-    };
-  }
-
   try {
-    const { data } = await supabase
-      .from("tournaments")
-      .select("name,city,country,status")
-      .eq("id", id)
-      .maybeSingle();
-
-    if (!data || data.status !== "approved") {
-      return { title: "Tournament not found — DebateHub", description: "Tournament not found." };
+    const db = await getMongoDb();
+    const t = await db.collection("tournaments").findOne(
+      { _id: id as any, status: "approved" } as any,
+      { projection: { name: 1, city: 1, country: 1, status: 1 } },
+    );
+    if (!t) {
+      return {
+        title: "Tournament not found — DebateHub",
+        description: "Tournament not found.",
+      };
     }
 
-    const loc = `${data.city ?? ""}${data.country ? `, ${data.country}` : ""}`.trim();
+    const loc = `${t.city ?? ""}${t.country ? `, ${t.country}` : ""}`.trim();
     return {
-      title: `${data.name} — DebateHub`,
-      description: loc ? `Tournament details for ${data.name} (${loc}).` : `Tournament details for ${data.name}.`,
+      title: `${t.name} — DebateHub`,
+      description: loc
+        ? `Tournament details for ${t.name} (${loc}).`
+        : `Tournament details for ${t.name}.`,
     };
   } catch {
     return { title: "Tournament — DebateHub", description: "Tournament details on DebateHub." };
@@ -148,46 +144,59 @@ export default async function TournamentPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const supabase = createServerSupabaseClient();
-
-  if (!supabase) {
-    return (
-      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-        <Link
-          href="/"
-          className="text-sm font-medium text-[var(--primary)] hover:underline"
-        >
-          ← Back to Browse
-        </Link>
-        <Card className="mt-6 p-6">
-          <div className="text-lg font-medium">Supabase not configured</div>
-          <div className="mt-2 text-sm text-[color:var(--muted)]">
-            Add real values to <code className="font-medium">.env.local</code>{" "}
-            for <code className="font-medium">NEXT_PUBLIC_SUPABASE_URL</code>{" "}
-            and <code className="font-medium">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>.
-          </div>
-        </Card>
-      </main>
+  let t = await (async () => {
+    const db = await getMongoDb();
+    return db.collection("tournaments").findOne(
+      { _id: id as any, status: "approved" } as any,
+      {
+        projection: {
+          _id: 1,
+          name: 1,
+          format: 1,
+          category: 1,
+          type: 1,
+          start_date: 1,
+          end_date: 1,
+          city: 1,
+          country: 1,
+          venue: 1,
+          address: 1,
+          maps_link: 1,
+          team_cap: 1,
+          registered_teams: 1,
+          fee: 1,
+          registration_deadline: 1,
+          registration_link: 1,
+          registration_open: 1,
+          rounds: 1,
+          judges: 1,
+          prizes: 1,
+          description: 1,
+          rules: 1,
+          payment_info: 1,
+          whatsapp: 1,
+          facebook: 1,
+          status: 1,
+          organization: 1,
+          email: 1,
+        },
+      },
     );
-  }
+  })();
 
-  const { data, error } = await supabase
-    .from("tournaments")
-    .select(
-      "id,name,format,category,type,start_date,end_date,city,country,venue,address,maps_link,team_cap,registered_teams,fee,registration_deadline,registration_link,registration_open,rounds,judges,prizes,description,rules,payment_info,whatsapp,facebook,status",
-    )
-    .eq("id", id)
-    .maybeSingle();
+  if (!t) notFound();
+  const mapped = t as any as Tournament;
+  const tournament = { ...mapped, id: (mapped as any)._id ?? mapped.id };
+  // Keep existing template references working (`t.*`) by aliasing to the normalized object.
+  t = tournament as any;
 
-  if (error || !data || data.status !== "approved") notFound();
-  const t = data as Tournament;
+  const cap = tournament.team_cap ?? null;
+  const reg = tournament.registered_teams ?? 0;
+  const pct =
+    cap && cap > 0 ? Math.round((Math.min(reg, cap) / cap) * 100) : 0;
 
-  const cap = t.team_cap ?? null;
-  const reg = t.registered_teams ?? 0;
-  const pct = cap && cap > 0 ? Math.round((Math.min(reg, cap) / cap) * 100) : 0;
-
-  const regBadge = registrationBadge(t);
-  const schedule = extractSchedule(t.description);
+  const regBadge = registrationBadge(tournament);
+  const schedule = extractSchedule(tournament.description);
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 pb-24 lg:pb-8">
@@ -207,38 +216,43 @@ export default async function TournamentPage({
           <Card className="p-6">
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-center gap-2">
-                {t.format ? <Badge variant={t.format}>{t.format}</Badge> : null}
-                {t.category ? (
+                {tournament.format ? (
+                  <Badge variant={tournament.format}>{tournament.format}</Badge>
+                ) : null}
+                {tournament.category ? (
                   <Badge variant="category" caps={false}>
-                    {t.category}
+                    {tournament.category}
                   </Badge>
                 ) : null}
                 <Badge variant={regBadge.variant}>{regBadge.label}</Badge>
-                {t.type ? (
+                {tournament.type ? (
                   <Badge variant="pending" className="normal-case" caps={false}>
-                    {t.type}
+                    {tournament.type}
                   </Badge>
                 ) : null}
               </div>
 
-              <h1 className="text-3xl font-medium tracking-tight">{t.name}</h1>
+              <h1 className="text-3xl font-medium tracking-tight">{tournament.name}</h1>
 
               <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                 <div>
                   <div className="ui-label text-[color:var(--muted)]">Date</div>
                   <div className="mt-1 text-sm font-medium">
-                    {formatDateRange(t.start_date, t.end_date)}
+                    {formatDateRange(tournament.start_date, tournament.end_date)}
                   </div>
                 </div>
                 <div>
                   <div className="ui-label text-[color:var(--muted)]">Location</div>
                   <div className="mt-1 text-sm font-medium">
-                    {(t.city ?? "City TBA") + (t.country ? `, ${t.country}` : "")}
+                    {(tournament.city ?? "City TBA") +
+                      (tournament.country ? `, ${tournament.country}` : "")}
                   </div>
                 </div>
                 <div>
                   <div className="ui-label text-[color:var(--muted)]">Venue</div>
-                  <div className="mt-1 text-sm font-medium">{t.venue ?? "TBA"}</div>
+                  <div className="mt-1 text-sm font-medium">
+                    {tournament.venue ?? "TBA"}
+                  </div>
                 </div>
                 <div>
                   <div className="ui-label text-[color:var(--muted)]">Teams</div>
@@ -253,7 +267,7 @@ export default async function TournamentPage({
                 <div>
                   <div className="ui-label text-[color:var(--muted)]">Rounds</div>
                   <div className="mt-1 text-sm font-medium">
-                    {t.rounds ?? "—"}
+                    {tournament.rounds ?? "—"}
                   </div>
                 </div>
               </div>
@@ -264,33 +278,41 @@ export default async function TournamentPage({
           <Card className="p-6">
             <h2 className="text-lg font-medium">About</h2>
             <div className="mt-3 whitespace-pre-wrap text-sm text-[color:var(--muted)]">
-              {t.description?.trim() ? t.description : "No description provided."}
+              {tournament.description?.trim()
+                ? tournament.description
+                : "No description provided."}
             </div>
 
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
               <div className="rounded-[14px] bg-[rgba(24,95,165,0.06)] p-4">
                 <div className="ui-label text-[color:var(--muted)]">Format</div>
-                <div className="mt-1 text-sm font-medium">{t.format ?? "—"}</div>
+                <div className="mt-1 text-sm font-medium">{tournament.format ?? "—"}</div>
               </div>
               <div className="rounded-[14px] bg-[rgba(24,95,165,0.06)] p-4">
                 <div className="ui-label text-[color:var(--muted)]">Category</div>
-                <div className="mt-1 text-sm font-medium">{t.category ?? "Open"}</div>
+                <div className="mt-1 text-sm font-medium">{tournament.category ?? "Open"}</div>
               </div>
               <div className="rounded-[14px] bg-[rgba(24,95,165,0.06)] p-4">
                 <div className="ui-label text-[color:var(--muted)]">Team cap</div>
-                <div className="mt-1 text-sm font-medium">{t.team_cap ?? "—"}</div>
+                <div className="mt-1 text-sm font-medium">{tournament.team_cap ?? "—"}</div>
               </div>
               <div className="rounded-[14px] bg-[rgba(24,95,165,0.06)] p-4">
                 <div className="ui-label text-[color:var(--muted)]">Fee</div>
-                <div className="mt-1 text-sm font-medium">{t.fee?.trim() ? t.fee : "—"}</div>
+                <div className="mt-1 text-sm font-medium">
+                  {tournament.fee?.trim() ? tournament.fee : "—"}
+                </div>
               </div>
               <div className="rounded-[14px] bg-[rgba(24,95,165,0.06)] p-4">
                 <div className="ui-label text-[color:var(--muted)]">Judges</div>
-                <div className="mt-1 text-sm font-medium">{t.judges?.trim() ? t.judges : "—"}</div>
+                <div className="mt-1 text-sm font-medium">
+                  {tournament.judges?.trim() ? tournament.judges : "—"}
+                </div>
               </div>
               <div className="rounded-[14px] bg-[rgba(24,95,165,0.06)] p-4 sm:col-span-2">
                 <div className="ui-label text-[color:var(--muted)]">Prizes</div>
-                <div className="mt-1 text-sm font-medium">{t.prizes?.trim() ? t.prizes : "—"}</div>
+                <div className="mt-1 text-sm font-medium">
+                  {tournament.prizes?.trim() ? tournament.prizes : "—"}
+                </div>
               </div>
             </div>
           </Card>
@@ -323,15 +345,15 @@ export default async function TournamentPage({
           <Card className="p-6">
             <h2 className="text-lg font-medium">Format and Rules</h2>
             <div className="mt-3 whitespace-pre-wrap text-sm text-[color:var(--muted)]">
-              {t.rules?.trim() ? t.rules : "No rules provided yet."}
+              {tournament.rules?.trim() ? tournament.rules : "No rules provided yet."}
             </div>
-            {t.payment_info?.trim() ? (
+            {tournament.payment_info?.trim() ? (
               <div className="mt-6">
                 <div className="ui-label text-[color:var(--muted)]">
                   Payment info
                 </div>
                 <div className="mt-2 whitespace-pre-wrap text-sm text-[color:var(--muted)]">
-                  {t.payment_info}
+                  {tournament.payment_info}
                 </div>
               </div>
             ) : null}
@@ -342,13 +364,13 @@ export default async function TournamentPage({
         <div className="space-y-5 lg:sticky lg:top-20">
           <RegistrationSidebar
             tournament={{
-              id: t.id,
-              registration_link: t.registration_link,
-              registration_open: t.registration_open,
-              registration_deadline: t.registration_deadline,
-              fee: t.fee,
-              team_cap: t.team_cap,
-              registered_teams: t.registered_teams,
+              id: tournament.id,
+              registration_link: tournament.registration_link,
+              registration_open: tournament.registration_open,
+              registration_deadline: tournament.registration_deadline,
+              fee: tournament.fee,
+              team_cap: tournament.team_cap,
+              registered_teams: tournament.registered_teams,
             }}
           />
 
@@ -357,16 +379,16 @@ export default async function TournamentPage({
             <div className="mt-2 space-y-2 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-[color:var(--muted)]">Organization</span>
-                <span className="font-medium">{t.organization ?? "—"}</span>
+                <span className="font-medium">{tournament.organization ?? "—"}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-[color:var(--muted)]">Email</span>
-                {t.email ? (
+                {tournament.email ? (
                   <a
-                    href={`mailto:${t.email}`}
+                    href={`mailto:${tournament.email}`}
                     className="font-medium text-[var(--primary)] hover:underline"
                   >
-                    {t.email}
+                    {tournament.email}
                   </a>
                 ) : (
                   <span className="font-medium">—</span>
@@ -374,13 +396,13 @@ export default async function TournamentPage({
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-[color:var(--muted)]">WhatsApp</span>
-                <span className="font-medium">{t.whatsapp ?? "—"}</span>
+                <span className="font-medium">{tournament.whatsapp ?? "—"}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-[color:var(--muted)]">Facebook</span>
-                {t.facebook ? (
+                {tournament.facebook ? (
                   <a
-                    href={t.facebook}
+                    href={tournament.facebook}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="font-medium text-[var(--primary)] hover:underline"

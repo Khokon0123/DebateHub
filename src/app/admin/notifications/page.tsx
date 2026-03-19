@@ -5,8 +5,6 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/cn";
-import { getAdminSupabase } from "../_lib/supabase";
-import { TOURNAMENT_SELECT_WITH_ORGANIZER, mapOrganizer } from "../_lib/queries";
 import type { AdminTournamentRow } from "../_lib/types";
 
 const STORAGE_KEY = "debatehub_admin_last_seen";
@@ -32,25 +30,18 @@ export default function AdminNotificationsPage() {
   }, []);
 
   async function load() {
-    const supabase = getAdminSupabase();
-    if (!supabase) return;
-    const sb = supabase;
-
     setLoading(true);
-    const { data, error } = await sb
-      .from("tournaments")
-      .select(TOURNAMENT_SELECT_WITH_ORGANIZER)
-      .order("created_at", { ascending: false })
-      .limit(25);
-
-    if (error) {
-      toast({ tone: "danger", message: error.message });
+    try {
+      const res = await fetch("/api/admin/notifications");
+      if (!res.ok) throw new Error("Could not load notifications.");
+      const data = (await res.json()) as any;
+      setRows((data?.items ?? []) as AdminTournamentRow[]);
+    } catch (e: any) {
+      toast({ tone: "danger", message: e?.message ?? "Could not load notifications." });
       setRows([]);
+    } finally {
       setLoading(false);
-      return;
     }
-    setRows(((data as any[]) ?? []).map(mapOrganizer));
-    setLoading(false);
   }
 
   React.useEffect(() => {

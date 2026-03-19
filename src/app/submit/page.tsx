@@ -11,7 +11,6 @@ import { Progress } from "@/components/ui/progress";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/cn";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 type Format = "BP" | "AP" | "WSDC" | "KP";
 type TType = "In-Person" | "Online" | "Hybrid";
@@ -191,8 +190,6 @@ export default function SubmitPage() {
 
   const [loading, setLoading] = React.useState(true);
   const [profile, setProfile] = React.useState<Profile | null>(null);
-  const [userId, setUserId] = React.useState<string | null>(null);
-  const [supabaseReady, setSupabaseReady] = React.useState(true);
 
   const [step, setStep] = React.useState<1 | 2 | 3 | 4>(1);
   const [errors, setErrors] = React.useState<Errors>({});
@@ -231,44 +228,35 @@ export default function SubmitPage() {
   });
 
   React.useEffect(() => {
-    const supabase = createBrowserSupabaseClient();
-    if (!supabase) {
-      setSupabaseReady(false);
-      setLoading(false);
-      return;
-    }
-    const sb = supabase;
-
     async function run() {
-      const { data } = await sb.auth.getUser();
-      if (!data.user) {
-        router.replace(`/login?next=${encodeURIComponent("/submit")}`);
-        return;
-      }
-
-      setUserId(data.user.id);
       try {
-        const { data: p } = await sb
-          .from("profiles")
-          .select("full_name,organization,email,whatsapp,facebook")
-          .eq("id", data.user.id)
-          .maybeSingle();
-        const prof = (p as Profile | null) ?? null;
+        setLoading(true);
+        const res = await fetch("/api/auth/me", { method: "GET" });
+        if (!res.ok) {
+          router.replace(`/login?next=${encodeURIComponent("/submit")}`);
+          return;
+        }
+
+        const data = (await res.json()) as any;
+        const prof = (data?.profile as Profile | null) ?? null;
         setProfile(prof);
         setS((prev) => ({
           ...prev,
           organizer: prof?.organization ?? "",
-          contact_email: prof?.email ?? data.user.email ?? "",
+          contact_email: prof?.email ?? data?.user?.email ?? "",
           whatsapp: prof?.whatsapp ?? "",
           facebook: prof?.facebook ?? "",
         }));
       } catch {
         // ignore; profile may not exist yet if schema isn't applied
+        const fallbackRes = await fetch("/api/auth/me", { method: "GET" }).catch(() => null);
+        const data = fallbackRes && fallbackRes.ok ? (await fallbackRes.json()) as any : null;
         setS((prev) => ({
           ...prev,
-          contact_email: data.user.email ?? "",
+          contact_email: data?.user?.email ?? "",
         }));
-      } finally {
+      }
+      finally {
         setLoading(false);
       }
     }
@@ -348,17 +336,6 @@ export default function SubmitPage() {
       setStep(3);
       return;
     }
-    if (!userId) {
-      toast({ tone: "danger", message: "You must be signed in to submit a tournament." });
-      return;
-    }
-
-    const supabase = createBrowserSupabaseClient();
-    if (!supabase) {
-      toast({ tone: "danger", message: "Supabase is not configured." });
-      return;
-    }
-    const sb = supabase;
 
     setSubmitting(true);
 
@@ -378,7 +355,6 @@ export default function SubmitPage() {
         : "";
 
     const payload = {
-      user_id: userId,
       name: s.name.trim(),
       format: s.format,
       category: s.category,
@@ -411,20 +387,21 @@ export default function SubmitPage() {
     };
 
     try {
-      const { data, error } = await sb
-        .from("tournaments")
-        .insert(payload)
-        .select("id")
-        .maybeSingle();
+      const res = await fetch("/api/tournaments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
       if (timedOut) return;
       window.clearTimeout(timeoutId);
       setSubmitting(false);
 
-      if (error || !data?.id) {
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as any;
         toast({
           tone: "danger",
-          message: error?.message || "Could not submit tournament.",
+          message: body?.error ?? "Could not submit tournament.",
         });
         return;
       }
@@ -440,19 +417,6 @@ export default function SubmitPage() {
         message: e?.message || "Could not submit tournament.",
       });
     }
-  }
-
-  if (!supabaseReady) {
-    return (
-      <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
-        <Card className="p-6">
-          <div className="text-lg font-medium">Supabase not configured</div>
-          <div className="mt-2 text-sm text-[color:var(--muted)]">
-            Add real values to <code className="font-medium">.env.local</code> to enable submissions.
-          </div>
-        </Card>
-      </main>
-    );
   }
 
   if (loading) {

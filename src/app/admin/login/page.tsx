@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { AuthCard } from "@/components/auth/auth-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 function LockIcon() {
   return (
@@ -42,63 +41,53 @@ export default function AdminLoginPage() {
     e.preventDefault();
     setError(null);
 
-    const supabase = createBrowserSupabaseClient();
-    if (!supabase) {
-      setError("Supabase is not configured.");
-      return;
-    }
-    const sb = supabase;
-
     setSubmitting(true);
 
     let timedOut = false;
     const timeoutId = window.setTimeout(() => {
       timedOut = true;
-      setError("Login failed, please try again.");
+      setSubmitting(false);
+      setError("Login failed, please try again");
     }, 10000);
 
     try {
-      const { data: authData, error: signInErr } = await sb.auth.signInWithPassword({
-        email: email.trim(),
-        password,
+      const loginRes = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
       });
 
       if (timedOut) return;
       window.clearTimeout(timeoutId);
 
-      if (signInErr || !authData?.user) {
-        setError("Login failed, please try again.");
+      if (!loginRes.ok) {
+        setError("Login failed, please try again");
         return;
       }
 
-      const user = authData.user;
-      const { data: profile, error: profErr } = await sb
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
-
-      if (profErr) {
+      const meRes = await fetch("/api/auth/me", { method: "GET" });
+      if (!meRes.ok) {
+        await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
         setError("Could not verify admin role, please try again");
         return;
       }
 
-      const role = ((profile as any)?.role as string | null)?.toLowerCase().trim() ?? "";
+      const me = (await meRes.json()) as any;
+      const role = (me?.profile?.role as string | null)?.toLowerCase().trim() ?? "";
+
       if (role !== "admin") {
-        await sb.auth.signOut();
+        await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
         setError("You do not have admin access");
         return;
       }
 
       router.replace("/admin");
-    } catch (err: any) {
+    } catch {
       if (timedOut) return;
       window.clearTimeout(timeoutId);
-      setError("Login failed, please try again.");
+      setError("Login failed, please try again");
     } finally {
-      if (!timedOut) {
-        setSubmitting(false);
-      }
+      if (!timedOut) setSubmitting(false);
     }
   }
 

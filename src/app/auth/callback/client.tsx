@@ -4,7 +4,6 @@ import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AuthCard } from "@/components/auth/auth-card";
 import { Spinner } from "@/components/ui/spinner";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 export default function AuthCallbackClient() {
   const router = useRouter();
@@ -14,26 +13,9 @@ export default function AuthCallbackClient() {
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    const supabase = createBrowserSupabaseClient();
-    if (!supabase) {
-      setError("Supabase is not configured. Add keys to .env.local.");
-      return;
-    }
-    const sb = supabase;
-
-    async function run() {
-      const code = searchParams.get("code");
-      if (code) {
-        const { error: exchangeErr } = await sb.auth.exchangeCodeForSession(code);
-        if (exchangeErr) {
-          setError(exchangeErr.message);
-          return;
-        }
-      }
-      router.replace(next);
-    }
-
-    run();
+    // Mongo migration: we no longer exchange OAuth/session codes here.
+    // Keep the callback route as a simple redirect target for compatibility.
+    router.replace(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

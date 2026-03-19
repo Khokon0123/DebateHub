@@ -6,7 +6,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AuthCard } from "@/components/auth/auth-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 export default function LoginClient() {
   const router = useRouter();
@@ -29,30 +28,6 @@ export default function LoginClient() {
     if (!trimmedEmail) return setError("Email is required.");
     if (!password) return setError("Password is required.");
 
-    // Simple local demo login (no Supabase required)
-    // Demo credentials:
-    // Email: demo@debatehub.test
-    // Password: DemoPass123!
-    if (
-      trimmedEmail.toLowerCase() === "demo@debatehub.test" &&
-      password === "DemoPass123!"
-    ) {
-      setSubmitting(true);
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem("debatehub_demo_user", "1");
-      }
-      router.replace("/dashboard");
-      return;
-    }
-
-    const supabase = createBrowserSupabaseClient();
-    if (!supabase) {
-      setError(
-        "Supabase is not configured. For now you can use the demo login: demo@debatehub.test / DemoPass123!.",
-      );
-      return;
-    }
-
     setSubmitting(true);
 
     let timedOut = false;
@@ -62,16 +37,18 @@ export default function LoginClient() {
     }, 8000);
 
     try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: trimmedEmail,
-        password,
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmedEmail, password }),
       });
 
       if (timedOut) return;
       window.clearTimeout(timeoutId);
 
-      if (signInError) {
-        setError(signInError.message);
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as any;
+        setError(body?.error ?? "Invalid login credentials.");
         return;
       }
 
@@ -84,34 +61,6 @@ export default function LoginClient() {
       if (!timedOut) {
         setSubmitting(false);
       }
-    }
-  }
-
-  async function onForgotPassword() {
-    setError(null);
-    if (!email.trim()) {
-      router.push(`/forgot-password`);
-      return;
-    }
-
-    const supabase = createBrowserSupabaseClient();
-    if (!supabase) {
-      setError("Supabase is not configured. Add keys to .env.local.");
-      return;
-    }
-
-    const { error: resetErr } = await supabase.auth.resetPasswordForEmail(
-      email.trim(),
-      {
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(
-          "/dashboard/profile",
-        )}`,
-      },
-    );
-
-    if (resetErr) {
-      setError(resetErr.message);
-      return;
     }
   }
 
@@ -179,13 +128,12 @@ export default function LoginClient() {
             </button>
           </div>
           <div className="mt-2 flex justify-end">
-            <button
-              type="button"
-              onClick={onForgotPassword}
+            <Link
+              href={`/forgot-password?email=${encodeURIComponent(email)}`}
               className="text-sm font-medium text-[var(--primary)] hover:underline"
             >
               Forgot password?
-            </button>
+            </Link>
           </div>
         </div>
 

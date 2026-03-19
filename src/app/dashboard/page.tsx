@@ -4,7 +4,6 @@ import * as React from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
-import { getDashboardSupabase } from "./_lib/supabase";
 import type { TournamentRow } from "./_lib/types";
 
 function firstName(fullNameOrEmail: string) {
@@ -20,10 +19,6 @@ export default function DashboardOverviewPage() {
   const [tournaments, setTournaments] = React.useState<TournamentRow[]>([]);
 
   React.useEffect(() => {
-    const supabase = getDashboardSupabase();
-    if (!supabase) return;
-    const sb = supabase;
-
     let cancelled = false;
     function withTimeout<T>(p: PromiseLike<T>, ms = 10000): Promise<T | null> {
       return Promise.race([
@@ -32,71 +27,37 @@ export default function DashboardOverviewPage() {
       ]);
     }
     async function load() {
-      setLoading(true);
-      const authRes = await withTimeout(sb.auth.getUser(), 10000);
-      if (!authRes) {
-        if (!cancelled) {
-          setTournaments([]);
-          setLoading(false);
-        }
-        return;
-      }
-      const { data: auth } = authRes;
-      if (!auth.user) {
-        if (!cancelled) {
-          setTournaments([]);
-          setLoading(false);
-        }
-        return;
-      }
-
       try {
-        const profRes = await withTimeout(
-          sb
-            .from("profiles")
-            .select("full_name,email")
-            .eq("id", auth.user.id)
-            .maybeSingle(),
+        setLoading(true);
+
+        const meRes = await withTimeout(
+          fetch("/api/auth/me").then(async (r) => (r.ok ? r.json() : null)),
           10000,
         );
-        const p = profRes?.data as any;
+
+        const tournamentsRes = await withTimeout(
+          fetch("/api/tournaments/me").then(async (r) => (r.ok ? r.json() : null)),
+          10000,
+        );
+
+        if (cancelled) return;
+
+        const profile = meRes?.profile as any;
+        const userEmail = (meRes?.user?.email as string | null) ?? null;
         const fullName =
-          (p?.full_name as string | null) ??
-          (auth.user.user_metadata?.full_name as string | undefined) ??
-          (auth.user.email ?? "Organizer");
+          (profile?.full_name as string | null | undefined) ??
+          userEmail ??
+          "Organizer";
         setName(fullName);
+
+        const items = (tournamentsRes?.items ?? []) as TournamentRow[];
+        setTournaments(items);
       } catch (e: any) {
-        console.log("[dashboard] overview profile fetch error:", e);
-        setName(auth.user.email ?? "Organizer");
-      }
-
-      const tournamentsRes = await withTimeout(
-        sb
-          .from("tournaments")
-          .select(
-            "id,user_id,name,format,status,start_date,end_date,city,country,venue,type,team_cap,registered_teams,registration_open,registration_link,updated_at,rounds,fee,registration_deadline,address,maps_link,description,rules,prizes",
-          )
-          .eq("user_id", auth.user.id)
-          .order("created_at", { ascending: false }),
-        10000,
-      );
-
-      if (cancelled) return;
-      if (!tournamentsRes) {
+        console.log("[dashboard] overview fetch error:", e);
         setTournaments([]);
-        setLoading(false);
-        return;
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-
-      const { data, error } = tournamentsRes;
-      if (error) {
-        console.log("[dashboard] overview tournaments fetch error:", error);
-        setTournaments([]);
-        setLoading(false);
-        return;
-      }
-      setTournaments((data as TournamentRow[]) ?? []);
-      setLoading(false);
     }
 
     load();

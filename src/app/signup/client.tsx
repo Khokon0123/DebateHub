@@ -8,7 +8,6 @@ import { PasswordStrength } from "@/components/auth/password-strength";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
@@ -20,6 +19,10 @@ export default function SignupClient() {
   const { toast } = useToast();
 
   const next = searchParams.get("next") || "/dashboard";
+  const [needsVerify, setNeedsVerify] = React.useState(false);
+  const [verificationSent, setVerificationSent] = React.useState<boolean | null>(
+    null,
+  );
 
   const [fullName, setFullName] = React.useState("");
   const [org, setOrg] = React.useState("");
@@ -53,36 +56,51 @@ export default function SignupClient() {
     const v = validate();
     if (v) return setError(v);
 
-    const supabase = createBrowserSupabaseClient();
-    if (!supabase) {
-      setError("Supabase is not configured. Add keys to .env.local.");
-      return;
-    }
-
     setSubmitting(true);
-    const { error: signUpError } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        // IMPORTANT: To remove email verification completely, disable email confirmations in Supabase:
-        // Supabase Dashboard → Authentication → Settings → turn OFF "Enable email confirmations".
-        // The client cannot force-disable confirmation emails if that setting is enabled.
-        data: {
+
+    let timedOut = false;
+    const timeoutId = window.setTimeout(() => {
+      timedOut = true;
+      setSubmitting(false);
+      setError("Something went wrong. Please try again.");
+    }, 10000);
+
+    try {
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
           full_name: fullName.trim(),
           organization: org.trim(),
           whatsapp: whatsapp.trim(),
-        },
-      },
-    });
+        }),
+      });
 
-    setSubmitting(false);
-    if (signUpError) {
-      setError(signUpError.message);
-      return;
+      if (timedOut) return;
+      window.clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as any;
+        setSubmitting(false);
+        setError(body?.error ?? "Could not create account.");
+        return;
+      }
+
+      const body = (await res.json().catch(() => null)) as any;
+      setVerificationSent(Boolean(body?.verificationSent));
+      setSubmitting(false);
+      toast({ tone: "success", message: "Account created" });
+      setNeedsVerify(true);
+    } catch {
+      if (timedOut) return;
+      window.clearTimeout(timeoutId);
+      setSubmitting(false);
+      setError("Something went wrong. Please try again.");
+    } finally {
+      if (!timedOut) setSubmitting(false);
     }
-
-    toast({ tone: "success", message: "Account created" });
-    router.replace(`/login?next=${encodeURIComponent(next)}&created=1`);
   }
 
   return (
@@ -100,7 +118,28 @@ export default function SignupClient() {
         </>
       }
     >
-      <form onSubmit={onSubmit} className="space-y-3">
+      {needsVerify ? (
+        <div className="space-y-3">
+          <div className="rounded-[14px] border border-[rgba(24,95,165,0.22)] bg-[var(--blue-bg)] p-4 text-sm text-[var(--blue-text)]">
+            {verificationSent === false ? (
+              <>
+                We created your account, but we couldn’t send the verification
+                email. Make sure your Appwrite platform includes this site URL,
+                then try again.
+              </>
+            ) : (
+              <>Please check your email to verify your account.</>
+            )}
+          </div>
+          <Link
+            href={`/login?next=${encodeURIComponent(next)}`}
+            className="inline-flex h-11 items-center justify-center rounded-xl bg-[var(--primary)] px-4 text-sm font-medium text-white hover:opacity-95"
+          >
+            Go to login
+          </Link>
+        </div>
+      ) : (
+        <form onSubmit={onSubmit} className="space-y-3">
         <div>
           <div className="ui-label text-[color:var(--muted)]">Full Name</div>
           <Input
@@ -201,6 +240,7 @@ export default function SignupClient() {
           Create Account
         </Button>
       </form>
+      )}
     </AuthCard>
   );
 }

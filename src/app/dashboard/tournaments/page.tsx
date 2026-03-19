@@ -8,7 +8,6 @@ import { Card } from "@/components/ui/card";
 import { Input, Select } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
-import { getDashboardSupabase } from "../_lib/supabase";
 import type { TournamentRow } from "../_lib/types";
 
 function fmtDate(d: string | null) {
@@ -27,7 +26,6 @@ function statusVariant(status: string) {
 export default function MyTournamentsPage() {
   const { toast } = useToast();
   const [loading, setLoading] = React.useState(true);
-  const [userId, setUserId] = React.useState<string | null>(null);
   const [items, setItems] = React.useState<TournamentRow[]>([]);
 
   const [open, setOpen] = React.useState(false);
@@ -58,31 +56,20 @@ export default function MyTournamentsPage() {
   });
 
   async function load() {
-    const supabase = getDashboardSupabase();
-    if (!supabase) return;
-    const sb = supabase;
-
     setLoading(true);
-    const { data: auth } = await sb.auth.getUser();
-    if (!auth.user) return;
-    setUserId(auth.user.id);
-
-    const { data, error } = await sb
-      .from("tournaments")
-      .select(
-        "id,user_id,name,format,status,start_date,end_date,city,country,venue,type,team_cap,registered_teams,registration_open,registration_link,updated_at,rounds,fee,registration_deadline,address,maps_link,description,rules,prizes",
-      )
-      .eq("user_id", auth.user.id)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      toast({ tone: "danger", message: error.message });
+    try {
+      const res = await fetch("/api/tournaments/me");
+      if (!res.ok) {
+        throw new Error("Could not load tournaments.");
+      }
+      const data = (await res.json()) as any;
+      setItems((data?.items ?? []) as TournamentRow[]);
+    } catch (e: any) {
+      toast({ tone: "danger", message: e?.message ?? "Could not load tournaments." });
       setItems([]);
+    } finally {
       setLoading(false);
-      return;
     }
-    setItems((data as TournamentRow[]) ?? []);
-    setLoading(false);
   }
 
   React.useEffect(() => {
@@ -114,44 +101,42 @@ export default function MyTournamentsPage() {
   }
 
   async function saveEdit() {
-    if (!current || !userId) return;
+    if (!current) return;
     if (!edit.name.trim()) {
       toast({ tone: "danger", message: "Tournament name is required." });
       return;
     }
 
-    const supabase = getDashboardSupabase();
-    if (!supabase) return;
-    const sb = supabase;
-
     setSaving(true);
-    const { error } = await sb
-      .from("tournaments")
-      .update({
-        name: edit.name.trim(),
-        format: edit.format || null,
-        type: edit.type || null,
-        start_date: edit.start_date || null,
-        end_date: edit.end_date || null,
-        city: edit.city.trim() || null,
-        country: edit.country.trim() || null,
-        venue: edit.venue.trim() || null,
-        team_cap: edit.team_cap ? Number(edit.team_cap) : null,
-        rounds: edit.rounds ? Number(edit.rounds) : null,
-        fee: edit.fee.trim() || null,
-        registration_deadline: edit.registration_deadline || null,
-        registration_link: edit.registration_link.trim() || null,
-        description: edit.description.trim() || null,
-        rules: edit.rules.trim() || null,
-        prizes: edit.prizes.trim() || null,
-        status: "pending",
-      })
-      .eq("id", current.id)
-      .eq("user_id", userId);
+    const payload = {
+      name: edit.name.trim(),
+      format: edit.format || null,
+      type: edit.type || null,
+      start_date: edit.start_date || null,
+      end_date: edit.end_date || null,
+      city: edit.city.trim() || null,
+      country: edit.country.trim() || null,
+      venue: edit.venue.trim() || null,
+      team_cap: edit.team_cap ? Number(edit.team_cap) : null,
+      rounds: edit.rounds ? Number(edit.rounds) : null,
+      fee: edit.fee.trim() || null,
+      registration_deadline: edit.registration_deadline || null,
+      registration_link: edit.registration_link.trim() || null,
+      description: edit.description.trim() || null,
+      rules: edit.rules.trim() || null,
+      prizes: edit.prizes.trim() || null,
+      status: "pending",
+    };
+
+    const res = await fetch(`/api/tournaments/${current.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
 
     setSaving(false);
-    if (error) {
-      toast({ tone: "danger", message: error.message });
+    if (!res.ok) {
+      toast({ tone: "danger", message: "Failed to save tournament." });
       return;
     }
 
@@ -162,33 +147,24 @@ export default function MyTournamentsPage() {
   }
 
   async function deleteTournament(t: TournamentRow) {
-    if (!userId) return;
     setDeleteTarget(t);
     setDeleteOpen(true);
   }
 
   async function confirmDelete() {
-    if (!userId || !deleteTarget) return;
-
-    const supabase = getDashboardSupabase();
-    if (!supabase) return;
-    const sb = supabase;
+    if (!deleteTarget) return;
 
     setDeleting(true);
     const id = deleteTarget.id;
     setItems((prev) => prev.filter((x) => x.id !== id));
 
-    const { error } = await sb
-      .from("tournaments")
-      .delete()
-      .eq("id", id)
-      .eq("user_id", userId);
+    const res = await fetch(`/api/tournaments/${id}`, { method: "DELETE" });
     setDeleting(false);
     setDeleteOpen(false);
     setDeleteTarget(null);
 
-    if (error) {
-      toast({ tone: "danger", message: error.message });
+    if (!res.ok) {
+      toast({ tone: "danger", message: "Delete failed." });
       await load();
       return;
     }

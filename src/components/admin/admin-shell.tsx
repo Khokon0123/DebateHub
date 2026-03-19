@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 type AdminProfile = {
   full_name: string | null;
@@ -27,9 +26,6 @@ function isActive(pathname: string, href: string) {
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const supabaseRef = React.useRef<ReturnType<
-    typeof createBrowserSupabaseClient
-  > | null>(null);
 
   const [ready, setReady] = React.useState(false);
   const [profile, setProfile] = React.useState<AdminProfile | null>(null);
@@ -37,62 +33,50 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const [denied, setDenied] = React.useState(false);
 
   React.useEffect(() => {
-    const supabase = (supabaseRef.current ??= createBrowserSupabaseClient());
-    if (!supabase) {
-      router.replace(`/admin/login`);
-      return;
-    }
-    const sb = supabase;
-
     let cancelled = false;
     async function load() {
       setDenied(false);
-      const { data } = await sb.auth.getUser();
-      if (!data.user) {
-        router.replace(`/admin/login`);
-        return;
-      }
-      if (cancelled) return;
-
-      setEmail(data.user.email ?? null);
       try {
-        const { data: p } = await sb
-          .from("profiles")
-          .select("full_name,email,role")
-          .eq("id", data.user.id)
-          .maybeSingle();
-        const prof = (p as AdminProfile | null) ?? null;
-        setProfile(prof);
-
-        const role =
-          (prof?.role ?? (data.user.user_metadata?.role as string | undefined) ?? "")
-            .toLowerCase()
-            .trim();
-        if (role !== "admin") {
-          // Sign them out and send to admin login
-          await sb.auth.signOut();
+        const res = await fetch("/api/auth/me", { method: "GET" });
+        if (!res.ok) {
           router.replace(`/admin/login`);
           return;
         }
-      } catch {
-        await sb.auth.signOut();
+        const data = (await res.json()) as any;
+
+        const user = data?.user;
+        const prof = (data?.profile as AdminProfile | null) ?? null;
+        if (!user) {
         router.replace(`/admin/login`);
-      } finally {
+        return;
+      }
+
+        if (cancelled) return;
+
+        setEmail(user.email ?? null);
+        setProfile(prof);
+
+        const role = (prof?.role as string | null) ?? null;
+        if ((role ?? "").toLowerCase().trim() !== "admin") {
+          await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+          router.replace(`/admin/login`);
+          return;
+        }
+
         if (!cancelled) setReady(true);
+      } catch {
+        router.replace(`/admin/login`);
       }
     }
 
     load();
-    const { data: sub } = sb.auth.onAuthStateChange(() => load());
     return () => {
       cancelled = true;
-      sub.subscription.unsubscribe();
     };
   }, [router, pathname]);
 
   async function signOut() {
-    const supabase = (supabaseRef.current ??= createBrowserSupabaseClient());
-    if (supabase) await supabase.auth.signOut();
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
     router.replace("/");
   }
 

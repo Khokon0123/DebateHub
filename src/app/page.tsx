@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { getMongoDb } from "@/lib/mongo/server";
 import HomeClient, { type TournamentRow } from "./(public)/home-client";
 
 export const revalidate = 60;
@@ -10,46 +10,63 @@ export const metadata: Metadata = {
 };
 
 export default async function HomePage() {
-  const supabase = createServerSupabaseClient();
-  if (!supabase) {
-    return (
-      <HomeClient
-        initial={[]}
-        countries={[]}
-        fetchError={"Supabase is not configured."}
-      />
-    );
-  }
-
   try {
-    const { data: countryRows } = await supabase
-      .from("tournaments")
-      .select("country")
-      .eq("status", "approved")
-      .not("country", "is", null)
-      .order("country", { ascending: true });
+    const db = await getMongoDb();
+    const tournaments = db.collection("tournaments");
 
-    const countries = Array.from(
-      new Set(
-        ((countryRows ?? []) as Array<{ country: string | null }>).flatMap((r) =>
-          r.country ? [r.country] : [],
-        ),
-      ),
-    );
+    const countryDocs = await tournaments.distinct("country", {
+      status: "approved",
+      country: { $ne: null },
+    });
 
-    const { data, error } = await supabase
-      .from("tournaments")
-      .select(
-        "id,name,format,category,type,start_date,end_date,city,country,venue,team_cap,registered_teams,registration_deadline,registration_open",
+    const countries = (countryDocs ?? [])
+      .map((c) => (typeof c === "string" ? c : null))
+      .filter(Boolean) as string[];
+    countries.sort((a, b) => a.localeCompare(b));
+
+    const docs = await tournaments
+      .find(
+        { status: "approved" },
+        {
+          projection: {
+            _id: 1,
+            name: 1,
+            format: 1,
+            category: 1,
+            type: 1,
+            start_date: 1,
+            end_date: 1,
+            city: 1,
+            country: 1,
+            venue: 1,
+            team_cap: 1,
+            registered_teams: 1,
+            registration_deadline: 1,
+            registration_open: 1,
+          },
+        },
       )
-      .eq("status", "approved")
-      .order("start_date", { ascending: true, nullsFirst: false });
+      .sort({ start_date: 1 })
+      .toArray();
 
-    if (error) {
-      return <HomeClient initial={[]} countries={countries} fetchError={error.message} />;
-    }
+    const initial = docs.map((d: any) => ({
+      id: d._id as string,
+      name: d.name ?? "",
+      format: d.format ?? null,
+      category: d.category ?? null,
+      type: d.type ?? null,
+      start_date: d.start_date ?? null,
+      end_date: d.end_date ?? null,
+      city: d.city ?? null,
+      country: d.country ?? null,
+      venue: d.venue ?? null,
+      team_cap: d.team_cap ?? null,
+      registered_teams: d.registered_teams ?? null,
+      registration_deadline: d.registration_deadline ?? null,
+      registration_open: d.registration_open ?? null,
+    })) as TournamentRow[];
 
-    return <HomeClient initial={((data ?? []) as TournamentRow[])} countries={countries} />;
+    return <HomeClient initial={initial} countries={countries} />;
   } catch (e: any) {
     return (
       <HomeClient

@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { getDashboardSupabase } from "../_lib/supabase";
 
 type Profile = {
   full_name: string | null;
@@ -25,9 +24,6 @@ export default function ProfilePage() {
   const [saving, setSaving] = React.useState(false);
   const [changingPw, setChangingPw] = React.useState(false);
 
-  const [userId, setUserId] = React.useState<string | null>(null);
-  const [authEmail, setAuthEmail] = React.useState<string>("");
-
   const [p, setP] = React.useState<Profile>({
     full_name: "",
     organization: "",
@@ -39,37 +35,25 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = React.useState("");
 
   React.useEffect(() => {
-    const supabase = getDashboardSupabase();
-    if (!supabase) return;
-    const sb = supabase;
-
     let cancelled = false;
     async function load() {
       setLoading(true);
-      const { data: auth } = await sb.auth.getUser();
-      if (!auth.user) return;
-      if (cancelled) return;
-
-      setUserId(auth.user.id);
-      setAuthEmail(auth.user.email ?? "");
-
       try {
-        const { data } = await sb
-          .from("profiles")
-          .select("full_name,organization,email,whatsapp,facebook")
-          .eq("id", auth.user.id)
-          .maybeSingle();
-
-        const prof = (data as Profile | null) ?? null;
+        const res = await fetch("/api/auth/me", { method: "GET" });
+        if (!res.ok) return;
+        const data = (await res.json()) as any;
+        const prof = (data?.profile as Profile | null) ?? null;
+        const uEmail = (data?.user?.email as string | null) ?? "";
+        if (cancelled) return;
         setP({
-          full_name: prof?.full_name ?? (auth.user.user_metadata?.full_name as string | undefined) ?? "",
-          organization: prof?.organization ?? (auth.user.user_metadata?.organization as string | undefined) ?? "",
-          email: prof?.email ?? (auth.user.email ?? ""),
-          whatsapp: prof?.whatsapp ?? (auth.user.user_metadata?.whatsapp as string | undefined) ?? "",
+          full_name: prof?.full_name ?? "",
+          organization: prof?.organization ?? "",
+          email: prof?.email ?? uEmail,
+          whatsapp: prof?.whatsapp ?? "",
           facebook: prof?.facebook ?? "",
         });
-      } catch {
-        setP((prev) => ({ ...prev, email: auth.user.email ?? "" }));
+      } catch (e: any) {
+        console.log("[dashboard] profile fetch error:", e);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -82,59 +66,35 @@ export default function ProfilePage() {
   }, []);
 
   async function saveProfile() {
-    if (!userId) return;
     if (!p.full_name?.trim()) return toast({ tone: "danger", message: "Full name is required." });
     if (!p.organization?.trim()) return toast({ tone: "danger", message: "Organization is required." });
     if (!p.email?.trim()) return toast({ tone: "danger", message: "Email is required." });
     if (!isValidEmail(p.email)) return toast({ tone: "danger", message: "Please enter a valid email." });
     if (!p.whatsapp?.trim()) return toast({ tone: "danger", message: "WhatsApp is required." });
-
-    const supabase = getDashboardSupabase();
-    if (!supabase) return;
-    const sb = supabase;
-
     setSaving(true);
-
-    const { error: upsertErr } = await sb.from("profiles").upsert(
-      {
-        id: userId,
-        full_name: p.full_name.trim(),
-        organization: p.organization.trim(),
-        email: p.email.trim(),
-        whatsapp: p.whatsapp.trim(),
-        facebook: p.facebook?.trim() || null,
-      },
-      { onConflict: "id" },
-    );
-
-    if (upsertErr) {
-      setSaving(false);
-      toast({ tone: "danger", message: upsertErr.message });
-      return;
-    }
-
-    // If they changed auth email, attempt to update it too (Supabase may require confirmation)
-    if (p.email.trim() && authEmail && p.email.trim() !== authEmail) {
-      const { error: authErr } = await sb.auth.updateUser({ email: p.email.trim() });
-      if (authErr) {
-        setSaving(false);
-        toast({
-          tone: "warning",
-          message: `Profile saved, but email change requires attention: ${authErr.message}`,
-        });
-        return;
-      }
-      toast({
-        tone: "warning",
-        message: "Profile saved. Please confirm the email change from your inbox.",
+    try {
+      const res = await fetch("/api/profiles/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          full_name: p.full_name.trim(),
+          organization: p.organization.trim(),
+          email: p.email.trim(),
+          whatsapp: p.whatsapp.trim(),
+          facebook: p.facebook?.trim() || null,
+        }),
       });
-      setAuthEmail(p.email.trim());
-      setSaving(false);
-      return;
-    }
 
-    setSaving(false);
-    toast({ tone: "success", message: "Profile saved" });
+      if (!res.ok) {
+        throw new Error("Failed to save profile.");
+      }
+
+      toast({ tone: "success", message: "Profile saved" });
+    } catch (e: any) {
+      toast({ tone: "danger", message: e?.message ?? "Failed to save profile." });
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function changePassword() {
@@ -142,19 +102,23 @@ export default function ProfilePage() {
       toast({ tone: "danger", message: "Password must be at least 8 characters." });
       return;
     }
-    const supabase = getDashboardSupabase();
-    if (!supabase) return;
-    const sb = supabase;
-
     setChangingPw(true);
-    const { error } = await sb.auth.updateUser({ password: newPassword });
-    setChangingPw(false);
-    if (error) {
-      toast({ tone: "danger", message: error.message });
-      return;
+    try {
+      const res = await fetch("/api/profiles/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword }),
+      });
+      if (!res.ok) {
+        throw new Error("Failed to update password.");
+      }
+      setNewPassword("");
+      toast({ tone: "success", message: "Password updated" });
+    } catch (e: any) {
+      toast({ tone: "danger", message: e?.message ?? "Failed to update password." });
+    } finally {
+      setChangingPw(false);
     }
-    setNewPassword("");
-    toast({ tone: "success", message: "Password updated" });
   }
 
   return (

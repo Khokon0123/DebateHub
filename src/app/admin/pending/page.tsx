@@ -6,8 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
-import { getAdminSupabase } from "../_lib/supabase";
-import { TOURNAMENT_SELECT_WITH_ORGANIZER, mapOrganizer } from "../_lib/queries";
 import type { AdminTournamentRow } from "../_lib/types";
 
 function fmtDateTime(v: string | null) {
@@ -30,25 +28,18 @@ export default function PendingApprovalPage() {
   const [view, setView] = React.useState<AdminTournamentRow | null>(null);
 
   async function load() {
-    const supabase = getAdminSupabase();
-    if (!supabase) return;
-    const sb = supabase;
-
     setLoading(true);
-    const { data, error } = await sb
-      .from("tournaments")
-      .select(TOURNAMENT_SELECT_WITH_ORGANIZER)
-      .eq("status", "pending")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      toast({ tone: "danger", message: error.message });
+    try {
+      const res = await fetch("/api/admin/tournaments?status=pending");
+      if (!res.ok) throw new Error("Could not load pending tournaments.");
+      const data = (await res.json()) as any;
+      setRows((data?.items ?? []) as AdminTournamentRow[]);
+    } catch (e: any) {
+      toast({ tone: "danger", message: e?.message ?? "Could not load pending tournaments." });
       setRows([]);
+    } finally {
       setLoading(false);
-      return;
     }
-    setRows(((data as any[]) ?? []).map(mapOrganizer));
-    setLoading(false);
   }
 
   React.useEffect(() => {
@@ -57,14 +48,12 @@ export default function PendingApprovalPage() {
   }, []);
 
   async function setStatus(id: string, status: "approved" | "rejected") {
-    const supabase = getAdminSupabase();
-    if (!supabase) return;
-    const sb = supabase;
-
-    const { error } = await (sb.from("tournaments") as any)
-      .update({ status })
-      .eq("id", id);
-    if (error) return toast({ tone: "danger", message: error.message });
+    const res = await fetch(`/api/admin/tournaments/${id}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    if (!res.ok) return toast({ tone: "danger", message: "Update failed." });
     toast({ tone: "success", message: status === "approved" ? "Approved" : "Rejected" });
     await load();
   }

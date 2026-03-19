@@ -9,7 +9,6 @@ import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/cn";
 import { Toggle } from "@/components/dashboard/toggle";
-import { getDashboardSupabase } from "../_lib/supabase";
 import type { TournamentRow } from "../_lib/types";
 
 function pct(reg: number, cap: number | null) {
@@ -27,52 +26,37 @@ function fmtTs(v: string | null) {
 export default function SlotTrackerPage() {
   const { toast } = useToast();
   const [loading, setLoading] = React.useState(true);
-  const [userId, setUserId] = React.useState<string | null>(null);
   const [items, setItems] = React.useState<TournamentRow[]>([]);
 
   const [draft, setDraft] = React.useState<Record<string, { reg: number; open: boolean }>>({});
   const [savingId, setSavingId] = React.useState<string | null>(null);
 
   async function load() {
-    const supabase = getDashboardSupabase();
-    if (!supabase) return;
-    const sb = supabase;
-
     setLoading(true);
-    const { data: auth } = await sb.auth.getUser();
-    if (!auth.user) return;
-    setUserId(auth.user.id);
-
-    const { data, error } = await sb
-      .from("tournaments")
-      .select(
-        "id,user_id,name,format,status,start_date,end_date,city,country,venue,type,team_cap,registered_teams,registration_open,registration_link,updated_at,rounds,fee,registration_deadline,address,maps_link,description,rules,prizes",
-      )
-      .eq("user_id", auth.user.id)
-      .eq("status", "approved")
-      .order("start_date", { ascending: true, nullsFirst: false });
-
-    if (error) {
-      toast({ tone: "danger", message: error.message });
-      setItems([]);
-      setLoading(false);
-      return;
-    }
-    const rows = (data as TournamentRow[]) ?? [];
-    setItems(rows);
-    setDraft((prev) => {
-      const next = { ...prev };
-      for (const r of rows) {
-        if (!next[r.id]) {
-          next[r.id] = {
-            reg: r.registered_teams ?? 0,
-            open: r.registration_open ?? true,
-          };
+    try {
+      const res = await fetch("/api/tournaments/slots/me", { method: "GET" });
+      if (!res.ok) throw new Error("Could not load slot tracker.");
+      const data = (await res.json()) as any;
+      const rows = (data?.items ?? []) as TournamentRow[];
+      setItems(rows);
+      setDraft((prev) => {
+        const next = { ...prev };
+        for (const r of rows) {
+          if (!next[r.id]) {
+            next[r.id] = {
+              reg: r.registered_teams ?? 0,
+              open: r.registration_open ?? true,
+            };
+          }
         }
-      }
-      return next;
-    });
-    setLoading(false);
+        return next;
+      });
+    } catch (e: any) {
+      toast({ tone: "danger", message: e?.message ?? "Could not load slot tracker." });
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
   }
 
   React.useEffect(() => {
@@ -91,11 +75,6 @@ export default function SlotTrackerPage() {
   }
 
   async function save(t: TournamentRow) {
-    if (!userId) return;
-    const supabase = getDashboardSupabase();
-    if (!supabase) return;
-    const sb = supabase;
-
     const d = draft[t.id];
     if (!d) return;
 
@@ -107,18 +86,15 @@ export default function SlotTrackerPage() {
     const nextOpen = shouldClose ? false : open;
 
     setSavingId(t.id);
-    const { error } = await sb
-      .from("tournaments")
-      .update({
-        registered_teams: reg,
-        registration_open: nextOpen,
-      })
-      .eq("id", t.id)
-      .eq("user_id", userId);
+    const res = await fetch(`/api/tournaments/${t.id}/slots`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ registered_teams: reg, registration_open: nextOpen }),
+    });
     setSavingId(null);
 
-    if (error) {
-      toast({ tone: "danger", message: error.message });
+    if (!res.ok) {
+      toast({ tone: "danger", message: "Update failed." });
       return;
     }
     toast({ tone: "success", message: "Updated" });

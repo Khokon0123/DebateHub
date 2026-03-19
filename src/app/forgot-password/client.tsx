@@ -7,7 +7,7 @@ import { AuthCard } from "@/components/auth/auth-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { getAppwriteAccount } from "@/lib/appwrite/appwrite";
 
 export default function ForgotPasswordClient() {
   const searchParams = useSearchParams();
@@ -26,28 +26,24 @@ export default function ForgotPasswordClient() {
 
     if (!email.trim()) return setError("Email is required.");
 
-    const supabase = createBrowserSupabaseClient();
-    if (!supabase)
-      return setError("Supabase is not configured. Add keys to .env.local.");
-
     setSubmitting(true);
-    const { error: resetErr } = await supabase.auth.resetPasswordForEmail(
-      email.trim(),
-      {
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(
-          "/dashboard/profile",
-        )}`,
-      },
-    );
-    setSubmitting(false);
-
-    if (resetErr) {
-      setError(resetErr.message);
-      return;
+    try {
+      const account = getAppwriteAccount();
+      if (!account) {
+        setError("Appwrite is not configured. Set NEXT_PUBLIC_APPWRITE_* env vars.");
+        return;
+      }
+      await account.createRecovery(
+        email.trim(),
+        `${window.location.origin}/reset-password`,
+      );
+      setSent(true);
+      toast({ tone: "success", message: "Reset link sent" });
+    } catch (e: any) {
+      setError(e?.message ?? "Could not send reset link.");
+    } finally {
+      setSubmitting(false);
     }
-
-    setSent(true);
-    toast({ tone: "success", message: "Reset link sent" });
   }
 
   return (
