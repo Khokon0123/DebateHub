@@ -45,19 +45,20 @@ export async function POST(req: Request) {
   // Block login unless Appwrite email is verified.
   try {
     const { users: awUsers } = getAppwriteAdmin();
-    const awUser = await awUsers.get({ userId: String(user._id) } as any);
-    const verified = Boolean((awUser as any)?.emailVerification);
-    if (!verified) {
+    const awUsersList = await awUsers.list([]);
+    const awUser = awUsersList.users.find(
+      (u: any) => u.email === normalizedEmail
+    );
+    if (!awUser || !awUser.emailVerification) {
       return NextResponse.json(
         { error: "Please verify your email first." },
-        { status: 403 },
+        { status: 403 }
       );
     }
   } catch {
-    // If Appwrite lookup fails, do not allow login (prevents bypass).
     return NextResponse.json(
       { error: "Please verify your email first." },
-      { status: 403 },
+      { status: 403 }
     );
   }
 
@@ -85,4 +86,3 @@ export async function POST(req: Request) {
 
   return res;
 }
-
