@@ -42,11 +42,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: e?.message ?? "Could not create account." }, { status: 400 });
   }
 
+  // Create verification token and store in MongoDB
+  const verifyToken = randomUUID();
+  const verifyExpires = new Date(Date.now() + 24 * 3600 * 1000).toISOString(); // 24 hours
+
   // Create auth user in MongoDB
   await users.insertOne({
     _id: userId as any,
     email: normalizedEmail,
     passwordHash,
+    verifyToken,
+    verifyExpires,
     createdAt: new Date().toISOString(),
   } as any);
 
@@ -62,16 +68,13 @@ export async function POST(req: Request) {
     createdAt: new Date().toISOString(),
   } as any);
 
-  // Send verification email via Nodemailer (Gmail)
+  // Send verification email via Nodemailer
   let verificationSent = false;
   try {
-    const { users: awUsers } = getAppwriteAdmin();
-    const token = await awUsers.createToken({ userId, expire: 3600 } as any);
-
     const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
     const proto = req.headers.get("x-forwarded-proto") ?? "http";
     const baseUrl = process.env.APP_URL || (host ? `${proto}://${host}` : "");
-    const verifyUrl = `${baseUrl}/verify?userId=${userId}&secret=${token.secret}`;
+    const verifyUrl = `${baseUrl}/verify?token=${verifyToken}&email=${encodeURIComponent(normalizedEmail)}`;
 
     const transporter = nodemailer.createTransport({
       service: "gmail",
@@ -91,7 +94,7 @@ export async function POST(req: Request) {
         <a href="${verifyUrl}" style="background:#1d4ed8;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;">
           Verify Email
         </a>
-        <p>This link expires in 1 hour.</p>
+        <p>This link expires in 24 hours.</p>
         <p>If you did not create an account, ignore this email.</p>
       `,
     });

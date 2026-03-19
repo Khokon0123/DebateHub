@@ -6,36 +6,33 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AuthCard } from "@/components/auth/auth-card";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { getAppwriteAccount } from "@/lib/appwrite/appwrite";
 
 export default function VerifyClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const userId = searchParams.get("userId");
-  const secret = searchParams.get("secret");
+  const token = searchParams.get("token");
+  const email = searchParams.get("email");
 
-  const [state, setState] = React.useState<"loading" | "success" | "error">(
-    "loading",
-  );
+  const [state, setState] = React.useState<"loading" | "success" | "error">("loading");
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     async function run() {
-      if (!userId || !secret) {
+      if (!token || !email) {
         setError("Invalid verification link.");
         setState("error");
         return;
       }
 
       try {
-        const account = getAppwriteAccount();
-        if (!account) {
-          setError("Appwrite is not configured. Set NEXT_PUBLIC_APPWRITE_* env vars.");
-          setState("error");
-          return;
-        }
-        await account.updateVerification(userId, secret);
+        const res = await fetch("/api/auth/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, email }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
         setState("success");
       } catch (e: any) {
         setError(e?.message ?? "Could not verify email.");
@@ -43,7 +40,7 @@ export default function VerifyClient() {
       }
     }
     run();
-  }, [userId, secret]);
+  }, [token, email]);
 
   return (
     <AuthCard
@@ -51,21 +48,18 @@ export default function VerifyClient() {
         state === "loading"
           ? "Verifying your email…"
           : state === "success"
-            ? "Email verified"
+            ? "Email verified!"
             : "Verification failed"
       }
       subtitle={
         state === "loading"
           ? "One moment while we confirm your account."
           : state === "success"
-            ? "You can now sign in."
+            ? "You can now sign in to DebateHub."
             : "Please try again."
       }
       footer={
-        <Link
-          href="/login"
-          className="font-medium text-[var(--primary)] hover:underline"
-        >
+        <Link href="/login" className="font-medium text-[var(--primary)] hover:underline">
           Back to login
         </Link>
       }
@@ -86,4 +80,3 @@ export default function VerifyClient() {
     </AuthCard>
   );
 }
-

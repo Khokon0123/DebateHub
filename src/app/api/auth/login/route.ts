@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { getMongoDb } from "@/lib/mongo/server";
-import { getAppwriteAdmin } from "@/lib/appwrite/admin";
 
 const COOKIE_NAME = "debatehub_token";
 
@@ -42,20 +41,8 @@ export async function POST(req: Request) {
     );
   }
 
-  // Block login unless Appwrite email is verified.
-  try {
-    const { users: awUsers } = getAppwriteAdmin();
-    const awUsersList = await awUsers.list([]);
-    const awUser = awUsersList.users.find(
-      (u: any) => u.email === normalizedEmail
-    );
-    if (!awUser || !awUser.emailVerification) {
-      return NextResponse.json(
-        { error: "Please verify your email first." },
-        { status: 403 }
-      );
-    }
-  } catch {
+  // Block login unless email is verified
+  if (!user.emailVerified) {
     return NextResponse.json(
       { error: "Please verify your email first." },
       { status: 403 }
