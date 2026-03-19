@@ -27,7 +27,6 @@ export default function SignupClient() {
   const [fullName, setFullName] = React.useState("");
   const [org, setOrg] = React.useState("");
   const [email, setEmail] = React.useState("");
-  const [whatsapp, setWhatsapp] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
   const [showPw, setShowPw] = React.useState(false);
@@ -41,7 +40,6 @@ export default function SignupClient() {
     if (!org.trim()) return "Organization/Club Name is required.";
     if (!email.trim()) return "Email is required.";
     if (!isValidEmail(email)) return "Please enter a valid email address.";
-    if (!whatsapp.trim()) return "WhatsApp Number is required.";
     if (!password) return "Password is required.";
     if (password.length < 8) return "Password must be at least 8 characters.";
     if (!confirm) return "Confirm Password is required.";
@@ -74,7 +72,6 @@ export default function SignupClient() {
           password,
           full_name: fullName.trim(),
           organization: org.trim(),
-          whatsapp: whatsapp.trim(),
         }),
       });
 
@@ -168,17 +165,6 @@ export default function SignupClient() {
             placeholder="you@example.com"
             inputMode="email"
             autoComplete="email"
-          />
-        </div>
-
-        <div>
-          <div className="ui-label text-[color:var(--muted)]">WhatsApp Number</div>
-          <Input
-            value={whatsapp}
-            onChange={(e) => setWhatsapp(e.target.value)}
-            placeholder="+1 555 123 4567"
-            inputMode="tel"
-            autoComplete="tel"
           />
         </div>
 
