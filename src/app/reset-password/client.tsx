@@ -6,14 +6,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AuthCard } from "@/components/auth/auth-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getAppwriteAccount } from "@/lib/appwrite/appwrite";
 
 export default function ResetPasswordClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const userId = searchParams.get("userId") ?? "";
-  const secret = searchParams.get("secret") ?? "";
+  const token = searchParams.get("token") ?? "";
+  const email = searchParams.get("email") ?? "";
 
   const [password, setPassword] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
@@ -25,7 +24,7 @@ export default function ResetPasswordClient() {
     e.preventDefault();
     setError(null);
 
-    if (!userId || !secret) {
+    if (!token || !email) {
       setError("Invalid or expired reset link.");
       return;
     }
@@ -40,12 +39,13 @@ export default function ResetPasswordClient() {
 
     setSubmitting(true);
     try {
-      const account = getAppwriteAccount();
-      if (!account) {
-        setError("Appwrite is not configured. Set NEXT_PUBLIC_APPWRITE_* env vars.");
-        return;
-      }
-      await account.updateRecovery(userId, secret, password);
+      const res = await fetch("/api/auth/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
       setDone(true);
     } catch (e: any) {
       setError(e?.message ?? "Could not reset password.");
@@ -114,4 +114,3 @@ export default function ResetPasswordClient() {
     </AuthCard>
   );
 }
-
