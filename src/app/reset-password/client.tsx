@@ -5,59 +5,59 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AuthCard } from "@/components/auth/auth-card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 
-export default function ResetPasswordClient() {
+export default function VerifyClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const token = searchParams.get("token") ?? "";
-  const email = searchParams.get("email") ?? "";
+  const userId = searchParams.get("userId");
+  const secret = searchParams.get("secret");
 
-  const [password, setPassword] = React.useState("");
-  const [confirm, setConfirm] = React.useState("");
-  const [submitting, setSubmitting] = React.useState(false);
+  const [state, setState] = React.useState<"loading" | "success" | "error">("loading");
   const [error, setError] = React.useState<string | null>(null);
-  const [done, setDone] = React.useState(false);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
+  React.useEffect(() => {
+    async function run() {
+      if (!userId || !secret) {
+        setError("Invalid verification link.");
+        setState("error");
+        return;
+      }
 
-    if (!token || !email) {
-      setError("Invalid or expired reset link.");
-      return;
+      try {
+        const tokenRes = await fetch(`/api/auth/verify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, secret }),
+        });
+        const tokenData = await tokenRes.json();
+        if (!tokenRes.ok) throw new Error(tokenData.error);
+        setState("success");
+      } catch (e: any) {
+        setError(e?.message ?? "Could not verify email.");
+        setState("error");
+      }
     }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
-    }
-    if (password !== confirm) {
-      setError("Passwords do not match.");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const res = await fetch("/api/auth/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, email, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setDone(true);
-    } catch (e: any) {
-      setError(e?.message ?? "Could not reset password.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
+    run();
+  }, [userId, secret]);
 
   return (
     <AuthCard
-      title="Set a new password"
-      subtitle="Choose a new password for your account."
+      title={
+        state === "loading"
+          ? "Verifying your email…"
+          : state === "success"
+            ? "Email verified!"
+            : "Verification failed"
+      }
+      subtitle={
+        state === "loading"
+          ? "One moment while we confirm your account."
+          : state === "success"
+            ? "You can now sign in to DebateHub."
+            : "Please try again."
+      }
       footer={
         <Link
           href="/login"
@@ -67,49 +67,18 @@ export default function ResetPasswordClient() {
         </Link>
       }
     >
-      {done ? (
-        <div className="space-y-3">
-          <div className="rounded-[14px] bg-[var(--blue-bg)] p-4 text-sm text-[var(--blue-text)]">
-            Password updated. You can now sign in.
-          </div>
-          <Button fullWidth onClick={() => router.replace("/login")}>
-            Go to login
-          </Button>
+      {state === "loading" ? (
+        <div className="flex justify-center py-6">
+          <Spinner />
         </div>
+      ) : state === "success" ? (
+        <Button fullWidth onClick={() => router.replace("/login")}>
+          Go to login
+        </Button>
       ) : (
-        <form onSubmit={onSubmit} className="space-y-3">
-          <div>
-            <div className="ui-label text-[color:var(--muted)]">New password</div>
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              autoComplete="new-password"
-            />
-          </div>
-          <div>
-            <div className="ui-label text-[color:var(--muted)]">Confirm password</div>
-            <Input
-              type="password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              placeholder="••••••••"
-              autoComplete="new-password"
-              error={!!confirm && password !== confirm}
-            />
-          </div>
-
-          {error ? (
-            <div className="rounded-[14px] border border-[rgba(163,45,45,0.35)] bg-[rgba(163,45,45,0.08)] p-3 text-sm text-[var(--danger)]">
-              {error}
-            </div>
-          ) : null}
-
-          <Button type="submit" fullWidth isLoading={submitting}>
-            Reset password
-          </Button>
-        </form>
+        <div className="rounded-[14px] border border-[rgba(163,45,45,0.35)] bg-[rgba(163,45,45,0.08)] p-3 text-sm text-[var(--danger)]">
+          {error ?? "Could not verify email."}
+        </div>
       )}
     </AuthCard>
   );
